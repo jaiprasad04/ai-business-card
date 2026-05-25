@@ -38,7 +38,6 @@ export default function Home() {
     userPrompt: ""
   });
 
-  const iframeRef = useRef(null);
 
   // Fetch user's cards
   useEffect(() => {
@@ -142,16 +141,6 @@ export default function Home() {
     }
   };
 
-  // Real-time Iframe Update
-  useEffect(() => {
-    if (iframeRef.current) {
-      const doc = generateCardDocument(formData);
-      const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow.document;
-      iframeDoc.open();
-      iframeDoc.write(doc);
-      iframeDoc.close();
-    }
-  }, [formData]);
 
   const handleSaveCard = async () => {
     if (!session?.user) {
@@ -672,9 +661,9 @@ export default function Home() {
             
             {/* Iframe for card layout */}
             <iframe
-              ref={iframeRef}
               title="Card Live Preview"
               className="w-full h-full border-none bg-slate-900 z-10"
+              srcDoc={generateCardDocument(formData)}
               sandbox="allow-scripts"
             />
           </div>

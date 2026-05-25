@@ -16,7 +16,6 @@ export function CardVisitorView({ card }) {
   ]);
   const [loading, setLoading] = useState(false);
 
-  const iframeRef = useRef(null);
   const chatEndRef = useRef(null);
 
   // Auto-scroll chat to bottom
@@ -26,16 +25,6 @@ export function CardVisitorView({ card }) {
     }
   }, [messages, loading]);
 
-  // Load Iframe document
-  useEffect(() => {
-    if (iframeRef.current) {
-      const doc = generateCardDocument(card);
-      const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow.document;
-      iframeDoc.open();
-      iframeDoc.write(doc);
-      iframeDoc.close();
-    }
-  }, [card]);
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -113,9 +102,9 @@ export function CardVisitorView({ card }) {
         {/* Mobile Device Frame */}
         <div className="w-full max-w-md aspect-[9/16] max-h-[680px] bg-slate-900 rounded-[36px] border-8 border-slate-800 shadow-2xl relative flex flex-col overflow-hidden">
           <iframe
-            ref={iframeRef}
             title="Business Card"
             className="w-full h-full border-none bg-slate-900"
+            srcDoc={generateCardDocument(card)}
             sandbox="allow-scripts"
           />
         </div>
