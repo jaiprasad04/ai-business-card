@@ -3,48 +3,109 @@
 import { useState, useEffect, useRef } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { generateCardDocument } from "@/lib/templates";
-import { FaIdCard, FaMagic, FaSave, FaPlus, FaCheck, FaGlobe, FaQrcode, FaArrowRight, FaLock, FaTrashAlt, FaRobot } from "react-icons/fa";
+import {
+  FaMagic, FaSave, FaPlus, FaCheck, FaGlobe, FaArrowRight,
+  FaTrashAlt, FaRobot, FaSpinner, FaChevronDown, FaQrcode,
+  FaDownload, FaCopy, FaExternalLinkAlt, FaIdCard, FaShareAlt,
+  FaPencilAlt, FaEye
+} from "react-icons/fa";
+import QRCode from "qrcode";
+
+const TEMPLATES = [
+  { id: "neumorphism",       name: "Neumorphism",               emoji: "🫧" },
+  { id: "cyberpunk-glitch",  name: "Cyberpunk Glitch",          emoji: "⚡" },
+  { id: "holographic-glass", name: "Holographic Glassmorphism", emoji: "🌈" },
+  { id: "interactive-3d",    name: "Interactive 3D Tilt",       emoji: "🎯" },
+  { id: "swiss-style",       name: "Swiss International Style", emoji: "🇨🇭" },
+  { id: "classic",           name: "Classic Minimal",           emoji: "✨" },
+  { id: "brutalist-marquee", name: "Brutalist Marquee",         emoji: "🔆" },
+];
+
+const SOCIAL_FIELDS = ["github", "linkedin", "twitter", "instagram", "facebook", "youtube", "dribbble", "behance"];
+
+const EMPTY_FORM = {
+  name: "", title: "", company: "", bio: "",
+  phone: "", email: "", website: "", address: "",
+  avatar: "", backgroundImage: "",
+  socialLinks: {},
+  showAiAssistant: true,
+  templateId: "neumorphism",
+  htmlContent: "", userPrompt: ""
+};
+
+// Shared input/label styles
+const inp = "w-full bg-white border border-gray-200 rounded px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all";
+const lbl = "block text-[11px] font-semibold text-gray-400 mb-1 uppercase tracking-wider";
 
 export default function Home() {
-  const { data: session, status } = useSession();
+  const { data: session } = useSession();
   const [cards, setCards] = useState([]);
   const [selectedCardId, setSelectedCardId] = useState("");
-  const [saveStatus, setSaveStatus] = useState(""); // "", "saving", "saved", "error"
-  const [aiStatus, setAiStatus] = useState(""); // "", "generating", "polling", "completed", "error"
+  const [saveStatus, setSaveStatus] = useState("");
+  const [aiStatus, setAiStatus] = useState("");
   const [aiError, setAiError] = useState("");
   const [aiTimer, setAiTimer] = useState(15);
   const [urlHash, setUrlHash] = useState("");
-  
-  // Card Form State
+  const [isUploading, setIsUploading] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+  // Mobile tab: "edit" | "preview" | "share"
+  const [mobileTab, setMobileTab] = useState("edit");
+  // Desktop right panel toggle on md screens
+  const [shareOpen, setShareOpen] = useState(false);
+  const templateDropRef = useRef(null);
+  const iframeRef = useRef(null);
+
   const [formData, setFormData] = useState({
+    ...EMPTY_FORM,
     name: "John Doe",
     title: "Senior Product Designer",
     company: "Acme Corporation",
-    bio: "Passionate about creating modern user interfaces, leveraging artificial intelligence, and building scalable design systems.",
+    bio: "Passionate about creating modern user interfaces and building scalable design systems.",
     phone: "+1 (555) 019-2834",
     email: "john.doe@example.com",
     website: "https://johndoe.design",
     address: "San Francisco, CA",
-    avatar: "",
-    backgroundImage: "",
-    socialLinks: {
-      github: "https://github.com",
-      linkedin: "https://linkedin.com",
-      twitter: "https://twitter.com"
-    },
-    showAiAssistant: true,
-    templateId: "classic",
-    htmlContent: "",
-    userPrompt: ""
+    socialLinks: { github: "https://github.com", linkedin: "https://linkedin.com", twitter: "https://twitter.com" },
   });
 
-
-  // Fetch user's cards
+  // Close dropdown on outside click
   useEffect(() => {
-    if (session?.user) {
-      fetchCards();
+    const handler = (e) => {
+      if (templateDropRef.current && !templateDropRef.current.contains(e.target)) {
+        setTemplateOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  useEffect(() => { if (session?.user) fetchCards(); }, [session]);
+
+  useEffect(() => {
+    if (cards.length > 0) {
+      const params = new URLSearchParams(window.location.search);
+      const idParam = params.get("id");
+      const newParam = params.get("new");
+      if (idParam) {
+        const matching = cards.find(c => c.id === idParam);
+        if (matching && selectedCardId !== idParam) {
+          loadCard(matching);
+        }
+      } else if (newParam && selectedCardId !== "") {
+        handleCreateNew();
+      }
     }
-  }, [session]);
+  }, [cards]);
+
+  useEffect(() => {
+    if (urlHash) {
+      const url = `${window.location.origin}/card/${urlHash}`;
+      QRCode.toDataURL(url, { width: 220, margin: 2, color: { dark: "#111827", light: "#ffffff" } })
+        .then(setQrDataUrl).catch(() => {});
+    } else { setQrDataUrl(""); }
+  }, [urlHash]);
 
   const fetchCards = async () => {
     try {
@@ -52,625 +113,604 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         setCards(data);
-        if (data.length > 0 && !selectedCardId) {
-          loadCard(data[0]);
+        
+        const params = new URLSearchParams(window.location.search);
+        const idParam = params.get("id");
+        const newParam = params.get("new");
+        
+        if (idParam) {
+          const matching = data.find(c => c.id === idParam);
+          if (matching) {
+            loadCard(matching);
+          } else if (data.length > 0) {
+            loadCard(data[0]);
+          }
+        } else if (newParam) {
+          handleCreateNew();
+        } else {
+          if (data.length > 0 && !selectedCardId) {
+            loadCard(data[0]);
+          }
         }
       }
-    } catch (e) {
-      console.error("Error fetching cards:", e);
-    }
+    } catch (e) {}
   };
 
   const loadCard = (card) => {
     setSelectedCardId(card.id);
     setUrlHash(card.urlHash);
-    let socials = { github: "", linkedin: "", twitter: "" };
-    try {
-      socials = typeof card.socialLinks === "string" ? JSON.parse(card.socialLinks) : (card.socialLinks || {});
-    } catch (e) {}
-
+    let socials = {};
+    try { socials = typeof card.socialLinks === "string" ? JSON.parse(card.socialLinks) : (card.socialLinks || {}); } catch (e) {}
     setFormData({
-      name: card.name,
-      title: card.title,
-      company: card.company,
-      bio: card.bio || "",
-      phone: card.phone || "",
-      email: card.email || "",
-      website: card.website || "",
-      address: card.address || "",
-      avatar: card.avatar || "",
-      backgroundImage: card.backgroundImage || "",
-      socialLinks: socials,
+      name: card.name || "", title: card.title || "", company: card.company || "",
+      bio: card.bio || "", phone: card.phone || "", email: card.email || "",
+      website: card.website || "", address: card.address || "", avatar: card.avatar || "",
+      backgroundImage: card.backgroundImage || "", socialLinks: socials,
       showAiAssistant: card.showAiAssistant !== false,
-      templateId: card.templateId,
-      htmlContent: card.htmlContent || "",
-      userPrompt: card.userPrompt || ""
+      templateId: card.templateId || "neumorphism",
+      htmlContent: card.htmlContent || "", userPrompt: card.userPrompt || ""
     });
   };
 
-  const handleCreateNew = () => {
-    setSelectedCardId("");
-    setUrlHash("");
-    setFormData({
-      name: "Your Name",
-      title: "Your Title",
-      company: "Your Company",
-      bio: "Your professional bio goes here.",
-      phone: "",
-      email: "",
-      website: "",
-      address: "",
-      avatar: "",
-      backgroundImage: "",
-      socialLinks: { github: "", linkedin: "", twitter: "" },
-      showAiAssistant: true,
-      templateId: "classic",
-      htmlContent: "",
-      userPrompt: ""
-    });
-  };
-
-  const handleInputChange = (e) => {
+  const handleCreateNew = () => { setSelectedCardId(""); setUrlHash(""); setFormData({ ...EMPTY_FORM }); };
+  const handleInput = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value
-    }));
+    setFormData(p => ({ ...p, [name]: type === "checkbox" ? checked : value }));
   };
-
-  const handleSocialChange = (e) => {
+  const handleSocialInput = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      socialLinks: {
-        ...prev.socialLinks,
-        [name]: value
-      }
-    }));
+    setFormData(p => ({ ...p, socialLinks: { ...p.socialLinks, [name]: value } }));
   };
 
-  // Base64 file converter for image uploads
-  const handleImageUpload = (e) => {
+  const handleImageUpload = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, avatar: reader.result }));
-      };
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+    setIsUploading(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      if (res.ok) { const d = await res.json(); if (d.url) setFormData(p => ({ ...p, avatar: d.url })); }
+    } catch (err) { console.error(err); } finally { setIsUploading(false); }
   };
 
-
-  const handleSaveCard = async () => {
-    if (!session?.user) {
-      signIn("google");
-      return;
-    }
-
+  const handleSave = async (asNew = false) => {
+    if (!session?.user) { signIn("google"); return; }
     setSaveStatus("saving");
     try {
+      const cardIdToSave = asNew ? undefined : (selectedCardId || undefined);
       const res = await fetch("/api/cards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: selectedCardId || undefined,
-          ...formData
-        })
+        body: JSON.stringify({ id: cardIdToSave, ...formData })
       });
-
       if (res.ok) {
-        const savedCard = await res.json();
-        setSaveStatus("saved");
-        setSelectedCardId(savedCard.id);
-        setUrlHash(savedCard.urlHash);
-        fetchCards();
-        setTimeout(() => setSaveStatus(""), 3000);
-      } else {
-        setSaveStatus("error");
-      }
-    } catch (e) {
-      setSaveStatus("error");
-    }
-  };
-
-  const handleDeleteCard = async () => {
-    if (!selectedCardId) return;
-    if (!confirm("Are you sure you want to delete this business card?")) return;
-
-    try {
-      const res = await fetch(`/api/cards?id=${selectedCardId}`, {
-        method: "DELETE"
-      });
-
-      if (res.ok) {
-        handleCreateNew();
-        fetchCards();
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // AI Generation Polling
-  const handleGenerateAI = async () => {
-    if (!session?.user) {
-      signIn("google");
-      return;
-    }
-
-    if (session.user.credits < 5) {
-      alert("You need at least 5 credits to generate a custom card styling layout.");
-      return;
-    }
-
-    // Save first to ensure the backend has the latest profile data
-    let currentId = selectedCardId;
-    setAiStatus("generating");
-    setAiError("");
-
-    try {
-      // 1. Persist the current form values first
-      const saveRes = await fetch("/api/cards", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: selectedCardId || undefined,
-          ...formData
-        })
-      });
-
-      if (!saveRes.ok) {
-        throw new Error("Failed to save card before generating AI styling");
-      }
-
-      const savedCard = await saveRes.json();
-      currentId = savedCard.id;
-      setSelectedCardId(savedCard.id);
-      setUrlHash(savedCard.urlHash);
-
-      // 2. Start AI layout generation
-      const genRes = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cardId: currentId,
-          userPrompt: formData.userPrompt
-        })
-      });
-
-      if (!genRes.ok) {
-        const txt = await genRes.text();
-        throw new Error(txt || "AI submission failed");
-      }
-
-      const { requestId } = await genRes.json();
-      setAiStatus("polling");
-      setAiTimer(15);
-
-      // 3. Poll for result status
-      let timerInterval = setInterval(() => {
-        setAiTimer(prev => (prev > 1 ? prev - 1 : 1));
-      }, 1000);
-
-      let attempts = 0;
-      const pollInterval = setInterval(async () => {
-        attempts++;
-        if (attempts > 20) {
-          clearInterval(pollInterval);
-          clearInterval(timerInterval);
-          setAiStatus("error");
-          setAiError("Generation timed out. Please try checking status again or reload.");
-          return;
-        }
-
-        try {
-          const statusRes = await fetch(`/api/generate/status?cardId=${currentId}&requestId=${requestId}`);
-          if (statusRes.ok) {
-            const data = await statusRes.json();
-            if (data.status === "completed") {
-              clearInterval(pollInterval);
-              clearInterval(timerInterval);
-              setAiStatus("completed");
-              
-              // Load the newly generated custom html
-              loadCard(data.card);
-              
-              // Refresh credits display by refreshing the browser router or fetching cards
-              fetchCards();
-              setTimeout(() => setAiStatus(""), 4000);
-            } else if (data.status === "failed") {
-              clearInterval(pollInterval);
-              clearInterval(timerInterval);
-              setAiStatus("error");
-              setAiError(data.error || "AI generation failed");
-            }
-          }
-        } catch (e) {
-          console.error(e);
-        }
-      }, 2000);
-
-    } catch (err) {
-      setAiStatus("error");
-      setAiError(err.message || "Failed to trigger AI generation");
-    }
-  };
-
-  return (
-    <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-slate-900 text-slate-100">
-      
-      {/* Sidebar: Form Controls */}
-      <div className="w-full md:w-[450px] flex flex-col border-r border-slate-800 bg-slate-950 overflow-y-auto p-6 space-y-6">
+        const saved = await res.json();
+        setSaveStatus("saved"); 
+        setSelectedCardId(saved.id); 
+        setUrlHash(saved.urlHash);
         
-        {/* Card Load / Switch Selector */}
-        {session?.user && cards.length > 0 && (
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-col gap-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Select Saved Card</label>
-            <div className="flex gap-2">
-              <select
-                value={selectedCardId}
-                onChange={(e) => {
-                  const card = cards.find(c => c.id === e.target.value);
-                  if (card) loadCard(card);
-                }}
-                className="flex-1 bg-slate-950 text-sm border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-violet-500"
+        if (typeof window !== "undefined") {
+          window.history.replaceState({}, "", `/?id=${saved.id}`);
+        }
+        
+        fetchCards(); 
+        setTimeout(() => setSaveStatus(""), 3000);
+      } else { setSaveStatus("error"); }
+    } catch (e) { setSaveStatus("error"); }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedCardId || !confirm("Delete this card?")) return;
+    try {
+      const res = await fetch(`/api/cards?id=${selectedCardId}`, { method: "DELETE" });
+      if (res.ok) { handleCreateNew(); fetchCards(); }
+    } catch (e) {}
+  };
+
+  const handleGenerateAI = async () => {
+    if (!session?.user) { signIn("google"); return; }
+    if ((session.user.credits ?? 0) < 5) { alert("You need at least 5 credits."); return; }
+    setAiStatus("generating"); setAiError("");
+    try {
+      const saveRes = await fetch("/api/cards", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: selectedCardId || undefined, ...formData })
+      });
+      if (!saveRes.ok) throw new Error("Save failed");
+      const savedCard = await saveRes.json();
+      setSelectedCardId(savedCard.id); setUrlHash(savedCard.urlHash);
+      const genRes = await fetch("/api/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cardId: savedCard.id, userPrompt: formData.userPrompt })
+      });
+      if (!genRes.ok) throw new Error(await genRes.text());
+      const { requestId } = await genRes.json();
+      setAiStatus("polling"); setAiTimer(15);
+      const tick = setInterval(() => setAiTimer(p => p > 1 ? p - 1 : 1), 1000);
+      let tries = 0;
+      const poll = setInterval(async () => {
+        tries++;
+        if (tries > 20) { clearInterval(poll); clearInterval(tick); setAiStatus("error"); setAiError("Timed out."); return; }
+        try {
+          const st = await fetch(`/api/generate/status?cardId=${savedCard.id}&requestId=${requestId}`);
+          if (st.ok) {
+            const d = await st.json();
+            if (d.status === "completed") { clearInterval(poll); clearInterval(tick); setAiStatus("completed"); loadCard(d.card); fetchCards(); setTimeout(() => setAiStatus(""), 4000); }
+            else if (d.status === "failed") { clearInterval(poll); clearInterval(tick); setAiStatus("error"); setAiError(d.error || "Failed"); }
+          }
+        } catch (e) {}
+      }, 2000);
+    } catch (err) { setAiStatus("error"); setAiError(err.message); }
+  };
+
+  // Download card as PNG via canvas
+  const handleDownload = async () => {
+    if (!iframeRef.current) return;
+    try {
+      const html2canvasMod = await import("html2canvas");
+      const html2canvas = html2canvasMod.default || html2canvasMod;
+      const iframeDoc = iframeRef.current.contentDocument;
+      if (!iframeDoc) return;
+      const canvas = await html2canvas(iframeDoc.body, { useCORS: true, scale: 2 });
+      const a = document.createElement("a");
+      a.href = canvas.toDataURL("image/png");
+      a.download = `${formData.name || "card"}-business-card.png`;
+      a.click();
+    } catch (e) {
+      // Fallback: open card page for manual save
+      if (urlHash) window.open(`/card/${urlHash}`, "_blank");
+    }
+  };
+
+  const cardUrl = urlHash ? `${typeof window !== "undefined" ? window.location.origin : ""}/card/${urlHash}` : "";
+  const selectedTemplate = TEMPLATES.find(t => t.id === formData.templateId) || TEMPLATES[0];
+  const handleCopyUrl = () => {
+    if (cardUrl) { navigator.clipboard.writeText(cardUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+  };
+
+  // ─── Sub-components ──────────────────────────────────────
+  const FormPanel = () => (
+    <div className="flex flex-col h-full">
+      {/* Saved cards list */}
+      {session?.user && cards.length > 0 && (
+        <div className="px-4 py-3 border-b border-gray-100">
+          <div className="flex items-center justify-between mb-2">
+            <span className={lbl}>My Cards</span>
+            <button onClick={handleCreateNew} className="flex items-center gap-1 text-[11px] text-violet-600 font-semibold hover:text-violet-700">
+              <FaPlus className="text-[9px]" /> New
+            </button>
+          </div>
+          <div className="flex flex-col gap-1 max-h-28 overflow-y-auto">
+            {cards.map(c => (
+              <div
+                key={c.id}
+                role="button"
+                onClick={() => loadCard(c)}
+                className={`w-full cursor-pointer flex items-center gap-2.5 px-3 py-2 rounded text-left text-xs transition-all ${
+                  selectedCardId === c.id
+                    ? "bg-violet-50 border border-violet-200 text-violet-700"
+                    : "border border-transparent hover:bg-gray-50 text-gray-600"
+                }`}
               >
-                {cards.map(c => (
-                  <option key={c.id} value={c.id}>{c.name} - {c.company}</option>
+                <FaIdCard className={`flex-shrink-0 ${selectedCardId === c.id ? "text-violet-500" : "text-gray-300"}`} />
+                <div className="min-w-0">
+                  <p className="font-semibold truncate">{c.name || "Untitled"}</p>
+                  <p className="text-[10px] text-gray-400 truncate">{c.company || "—"}</p>
+                </div>
+                {selectedCardId === c.id && (
+                  <button onClick={(e) => { e.stopPropagation(); handleDelete(); }} className="ml-auto text-gray-300 hover:text-red-400 transition-colors flex-shrink-0">
+                    <FaTrashAlt className="text-[10px]" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Scrollable form */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
+
+        {/* Template picker */}
+        <div>
+          <label className={lbl}>Template <span className="normal-case font-normal text-gray-300">(optional)</span></label>
+          <div className="relative" ref={templateDropRef}>
+            <button
+              type="button" onClick={() => setTemplateOpen(o => !o)}
+              className="w-full flex items-center justify-between bg-white border border-gray-200 rounded px-3 py-2.5 text-sm font-medium text-gray-800 hover:border-violet-300 focus:outline-none transition-all"
+            >
+              <div className="flex items-center gap-2">
+                <span>{selectedTemplate.emoji}</span>
+                <span className="truncate">{selectedTemplate.name}</span>
+              </div>
+              <FaChevronDown className={`text-gray-400 text-[10px] flex-shrink-0 transition-transform ${templateOpen ? "rotate-180" : ""}`} />
+            </button>
+            {templateOpen && (
+              <div className="absolute z-[100] top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded shadow-xl overflow-hidden">
+                {TEMPLATES.map(t => (
+                  <button
+                    key={t.id} type="button"
+                    onClick={() => { setFormData(p => ({ ...p, templateId: t.id })); setTemplateOpen(false); }}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 text-left text-sm hover:bg-gray-50 transition-colors ${
+                      formData.templateId === t.id ? "bg-violet-50 text-violet-700" : "text-gray-700"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span>{t.emoji}</span>
+                      <span className="font-medium text-sm">{t.name}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">Free</span>
+                      {formData.templateId === t.id && <FaCheck className="text-violet-500 text-[10px]" />}
+                    </div>
+                  </button>
                 ))}
-              </select>
-              <button
-                onClick={handleCreateNew}
-                className="bg-slate-800 hover:bg-slate-700 text-white rounded-xl px-3 py-2 text-xs font-semibold flex items-center justify-center gap-1 active:scale-[0.98] transition-all"
-                title="Create New Card"
-              >
-                <FaPlus />
+              </div>
+            )}
+          </div>
+          {formData.templateId === "custom" && <p className="mt-1 text-[11px] text-violet-600 font-medium">✨ Custom AI layout active</p>}
+        </div>
+
+        {/* Identity */}
+        <div className="space-y-2.5">
+          <p className={lbl}>Identity</p>
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-1">Full Name</label>
+            <input type="text" name="name" value={formData.name} onChange={handleInput} placeholder="John Doe" className={inp} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] text-gray-400 block mb-1">Job Title</label>
+              <input type="text" name="title" value={formData.title} onChange={handleInput} placeholder="Designer" className={inp} />
+            </div>
+            <div>
+              <label className="text-[11px] text-gray-400 block mb-1">Company</label>
+              <input type="text" name="company" value={formData.company} onChange={handleInput} placeholder="Acme Corp" className={inp} />
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-1">Bio</label>
+            <textarea name="bio" value={formData.bio} onChange={handleInput} rows={3} placeholder="Short professional bio..." className={`${inp} resize-none`} />
+          </div>
+        </div>
+
+        {/* Photo */}
+        <div>
+          <label className={lbl}>Profile Photo</label>
+          <div className="flex items-center gap-3 p-3 bg-gray-50 rounded border border-dashed border-gray-200">
+            <div className="w-11 h-11 rounded overflow-hidden border border-gray-200 bg-white flex items-center justify-center text-gray-300 flex-shrink-0">
+              {isUploading ? <FaSpinner className="animate-spin text-violet-500 text-sm" />
+                : formData.avatar
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={formData.avatar} alt="" className="w-full h-full object-cover" />
+                  : <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+              }
+            </div>
+            <div className="flex-1 min-w-0">
+              <input type="file" accept="image/*" onChange={handleImageUpload} disabled={isUploading}
+                className="text-[11px] text-gray-500 w-full file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:font-semibold file:bg-violet-50 file:text-violet-600 hover:file:bg-violet-100 cursor-pointer disabled:opacity-50"
+              />
+              <p className="text-[10px] text-gray-400 mt-0.5">PNG, JPG · max 5MB</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Contact */}
+        <div className="space-y-2.5">
+          <p className={lbl}>Contact</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] text-gray-400 block mb-1">Email</label>
+              <input type="email" name="email" value={formData.email} onChange={handleInput} placeholder="you@email.com" className={inp} />
+            </div>
+            <div>
+              <label className="text-[11px] text-gray-400 block mb-1">Phone</label>
+              <input type="text" name="phone" value={formData.phone} onChange={handleInput} placeholder="+1 555 000" className={inp} />
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-1">Website</label>
+            <input type="text" name="website" value={formData.website} onChange={handleInput} placeholder="https://yoursite.com" className={inp} />
+          </div>
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-1">Location</label>
+            <input type="text" name="address" value={formData.address} onChange={handleInput} placeholder="City, Country" className={inp} />
+          </div>
+        </div>
+
+        {/* Social Links */}
+        <div className="space-y-2">
+          <p className={lbl}>Social Links</p>
+          {SOCIAL_FIELDS.map(field => (
+            <div key={field} className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold text-gray-400 uppercase w-14 flex-shrink-0 text-right">{field}</span>
+              <input type="text" name={field} value={formData.socialLinks[field] || ""} onChange={handleSocialInput}
+                placeholder="https://..." className={inp} />
+            </div>
+          ))}
+        </div>
+
+        {/* AI Assistant toggle */}
+        <div className="flex items-center justify-between py-2.5 px-3 bg-gray-50 rounded border border-gray-100">
+          <div className="flex items-center gap-2">
+            <FaRobot className="text-violet-500 text-sm" />
+            <div>
+              <p className="text-xs font-semibold text-gray-800">AI Visitor Assistant</p>
+              <p className="text-[10px] text-gray-400">Let visitors chat with your AI clone</p>
+            </div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+            <input type="checkbox" name="showAiAssistant" checked={formData.showAiAssistant} onChange={handleInput} className="sr-only peer" />
+            <div className="w-9 h-5 bg-gray-200 rounded-full peer peer-checked:bg-violet-500 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />
+          </label>
+        </div>
+
+        {/* AI Styling */}
+        <div className="bg-gradient-to-br from-violet-50 to-indigo-50 border border-violet-100 rounded p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <FaMagic className="text-violet-500 text-xs" />
+              <span className="text-xs font-bold text-violet-700">AI Custom Design</span>
+            </div>
+            <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded-full">5 Credits</span>
+          </div>
+          <textarea name="userPrompt" value={formData.userPrompt} onChange={handleInput} rows={2}
+            className="w-full bg-white border border-violet-100 rounded px-3 py-2 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500/20 resize-none transition-all"
+            placeholder="e.g. neon cyberpunk, warm minimal, dark futuristic..."
+          />
+          <button onClick={handleGenerateAI} disabled={aiStatus === "generating" || aiStatus === "polling"}
+            className="w-full bg-violet-600 hover:bg-violet-700 text-white rounded py-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-all disabled:opacity-50">
+            {aiStatus === "generating" || aiStatus === "polling"
+              ? <><FaSpinner className="animate-spin" /><span>Generating… ({aiTimer}s)</span></>
+              : <><FaMagic /><span>Generate with AI</span></>}
+          </button>
+          {aiStatus === "error" && <p className="text-[10px] text-red-600 bg-red-50 border border-red-100 rounded px-3 py-2">{aiError}</p>}
+        </div>
+      </div>
+
+      {/* Save button */}
+      <div className="p-4 border-t border-gray-100 bg-white">
+        {selectedCardId ? (
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => handleSave(false)} disabled={saveStatus === "saving"}
+              className="bg-gray-900 hover:bg-gray-800 text-white rounded py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer">
+              {saveStatus === "saving" ? <><FaSpinner className="animate-spin text-[10px]" /><span>Saving…</span></>
+                : saveStatus === "saved" ? <><FaCheck className="text-emerald-400 text-[10px]" /><span>Saved!</span></>
+                : <><FaSave className="text-[10px]" /><span>Save Changes</span></>}
+            </button>
+            <button onClick={() => handleSave(true)} disabled={saveStatus === "saving"}
+              className="bg-white hover:bg-gray-50 text-violet-700 border border-violet-200 rounded py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer">
+              <FaPlus className="text-[9px]" />
+              <span>Save as New Copy</span>
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => handleSave(false)} disabled={saveStatus === "saving"}
+            className="w-full bg-gray-900 hover:bg-gray-800 text-white rounded py-2.5 text-sm font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer">
+            {saveStatus === "saving" ? <><FaSpinner className="animate-spin text-xs" /><span>Saving…</span></>
+              : saveStatus === "saved" ? <><FaCheck className="text-emerald-400 text-xs" /><span>Saved!</span></>
+              : <><FaSave className="text-xs" /><span>Save Card</span></>}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  const PreviewPanel = () => (
+    <div className="flex-1 flex flex-col overflow-hidden bg-gray-50">
+      {/* Preview toolbar */}
+      <div className="px-4 py-3 bg-white border-b border-gray-100 flex items-center justify-between gap-3 flex-shrink-0">
+        <div className="min-w-0">
+          <h1 className="text-sm font-bold text-gray-900 leading-none">Live Preview</h1>
+          <p className="text-[11px] text-gray-400 mt-0.5">Updates as you type</p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {urlHash && (
+            <>
+              <button onClick={handleDownload}
+                className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-200 px-2.5 py-1.5 rounded hover:bg-gray-100 transition-all">
+                <FaDownload className="text-[10px]" />
+                <span className="hidden sm:inline">Download</span>
               </button>
+              <a href={`/card/${urlHash}`} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 bg-violet-50 border border-violet-200 px-2.5 py-1.5 rounded hover:bg-violet-100 transition-all">
+                <FaGlobe className="text-[10px]" />
+                <span className="hidden sm:inline">Open</span>
+                <FaArrowRight className="text-[9px]" />
+              </a>
+            </>
+          )}
+          {/* Share button on md screens (toggles right panel) */}
+          <button onClick={() => setShareOpen(o => !o)}
+            className="lg:hidden flex items-center gap-1.5 text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-200 px-2.5 py-1.5 rounded hover:bg-gray-100 transition-all">
+            <FaShareAlt className="text-[10px]" />
+            <span className="hidden sm:inline">Share</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Preview area */}
+      <div className="flex-1 flex items-center justify-center p-4 md:p-8 relative overflow-hidden min-h-0">
+        <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px] opacity-50 pointer-events-none" />
+
+        {/* AI overlay */}
+        {(aiStatus === "generating" || aiStatus === "polling") && (
+          <div className="absolute inset-0 bg-white/85 backdrop-blur-sm flex flex-col items-center justify-center z-20 gap-3">
+            <div className="w-9 h-9 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+            <div className="text-center px-4">
+              <p className="text-sm font-bold text-gray-900">Generating your card…</p>
+              <p className="text-xs text-gray-500 mt-1">AI crafting custom design · {aiTimer}s</p>
             </div>
           </div>
         )}
+        {aiStatus === "completed" && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-full shadow-lg flex items-center gap-1.5">
+            <FaCheck className="text-[10px]" /> AI design applied!
+          </div>
+        )}
 
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-extrabold tracking-tight flex items-center gap-2">
-            <FaIdCard className="text-violet-500" />
-            <span>Card Designer</span>
-          </h2>
-          {selectedCardId && (
-            <button
-              onClick={handleDeleteCard}
-              className="text-xs text-red-500 hover:text-red-400 font-semibold flex items-center gap-1 bg-red-950/20 border border-red-900/30 px-2.5 py-1.5 rounded-lg active:scale-95 transition-all"
-            >
-              <FaTrashAlt />
-              <span>Delete</span>
-            </button>
-          )}
+        {/* Responsive card frame */}
+        <div className="relative z-10 w-full max-w-xs sm:max-w-sm md:max-w-md h-[460px] sm:h-[520px] md:h-[600px] bg-white rounded-2xl border border-gray-200 shadow-xl overflow-hidden flex flex-col">
+          <iframe
+            ref={iframeRef}
+            title="Card Preview"
+            className="w-full h-full border-none"
+            srcDoc={generateCardDocument(formData)}
+            sandbox="allow-scripts"
+          />
+        </div>
+      </div>
+    </div>
+  );
+
+  const SharePanel = () => (
+    <div className="h-full flex flex-col">
+      <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
+        <h3 className="text-sm font-bold text-gray-900">Share Your Card</h3>
+        <p className="text-[11px] text-gray-400 mt-0.5">Copy link or download QR code</p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-5">
+        {/* URL */}
+        <div>
+          <label className={lbl}>Card URL</label>
+          <div className="flex gap-2">
+            <input type="text" value={cardUrl || ""} readOnly
+              placeholder="Save your card first…"
+              className="flex-1 min-w-0 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-600 focus:outline-none cursor-default" />
+            {cardUrl && (
+              <button onClick={handleCopyUrl}
+                className="flex-shrink-0 flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-white border border-gray-200 rounded hover:bg-gray-50 transition-all text-gray-700">
+                {copied ? <FaCheck className="text-emerald-500" /> : <FaCopy />}
+                <span className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Section 1: Templates Selector */}
-        <div className="space-y-3">
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">1. Style Template</label>
+        {/* Open / Download actions */}
+        {urlHash && (
           <div className="grid grid-cols-2 gap-2">
-            {[
-              { id: "classic", name: "Classic Blue" },
-              { id: "dark-tech", name: "Tech Dark" },
-              { id: "gradient", name: "Gradient Glass" },
-              { id: "serif", name: "Vintage Serif" },
-              { id: "gold", name: "Elegant Gold" }
-            ].map(t => (
-              <button
-                key={t.id}
-                onClick={() => setFormData(prev => ({ ...prev, templateId: t.id }))}
-                className={`py-2 px-3 rounded-xl border text-xs font-semibold text-center transition-all ${
-                  formData.templateId === t.id
-                    ? "border-violet-500 bg-violet-600/10 text-violet-400"
-                    : "border-slate-800 bg-slate-900/40 text-slate-400 hover:bg-slate-900"
-                }`}
-              >
-                {t.name}
-              </button>
-            ))}
-            {formData.templateId === "custom" && (
-              <button
-                className="col-span-2 py-2 px-3 rounded-xl border border-violet-500 bg-violet-600/20 text-violet-300 text-xs font-semibold text-center"
-                disabled
-              >
-                Custom AI Layout Enabled ✨
-              </button>
-            )}
+            <a href={cardUrl} target="_blank" rel="noopener noreferrer"
+              className="flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-violet-600 bg-violet-50 border border-violet-200 rounded hover:bg-violet-100 transition-all">
+              <FaExternalLinkAlt className="text-[10px]" /> Open
+            </a>
+            <button onClick={handleDownload}
+              className="flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-gray-700 bg-gray-50 border border-gray-200 rounded hover:bg-gray-100 transition-all">
+              <FaDownload className="text-[10px]" /> Download
+            </button>
           </div>
-        </div>
+        )}
 
-        {/* Section 2: Contact Info */}
-        <div className="space-y-4">
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">2. Contact Details</label>
-          
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Name</span>
-              <input
-                type="text"
-                name="name"
-                value={formData.name}
-                onChange={handleInputChange}
-                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
-                placeholder="Name"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Job Title</span>
-              <input
-                type="text"
-                name="title"
-                value={formData.title}
-                onChange={handleInputChange}
-                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
-                placeholder="Title"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1 col-span-2">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Company</span>
-              <input
-                type="text"
-                name="company"
-                value={formData.company}
-                onChange={handleInputChange}
-                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
-                placeholder="Company Name"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-bold text-slate-500 uppercase">Bio / Description</span>
-            <textarea
-              name="bio"
-              value={formData.bio}
-              onChange={handleInputChange}
-              rows="3"
-              className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500 resize-none"
-              placeholder="Short bio details..."
-            />
-          </div>
-
-          {/* Base64 Avatar Upload */}
-          <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-2xl flex flex-col gap-2">
-            <span className="text-[10px] font-bold text-slate-500 uppercase">Upload Profile Picture</span>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center text-slate-500">
-                {formData.avatar ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={formData.avatar} alt="Preview" class="w-full h-full object-cover" />
-                ) : "+"}
-              </div>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleImageUpload}
-                className="text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[10px] file:font-semibold file:bg-slate-800 file:text-slate-300 hover:file:bg-slate-700 cursor-pointer"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Email</span>
-              <input
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleInputChange}
-                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
-                placeholder="Email Address"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Phone</span>
-              <input
-                type="text"
-                name="phone"
-                value={formData.phone}
-                onChange={handleInputChange}
-                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
-                placeholder="Phone Number"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Website</span>
-              <input
-                type="text"
-                name="website"
-                value={formData.website}
-                onChange={handleInputChange}
-                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
-                placeholder="https://..."
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Location / City</span>
-              <input
-                type="text"
-                name="address"
-                value={formData.address}
-                onChange={handleInputChange}
-                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500"
-                placeholder="Location"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Section 3: Social Media Links */}
-        <div className="space-y-3">
-          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">3. Social Links</label>
-          <div className="grid grid-cols-3 gap-2">
-            {["github", "linkedin", "twitter"].map(field => (
-              <div key={field} className="flex flex-col gap-1">
-                <span className="text-[9px] font-bold text-slate-500 uppercase">{field} URL</span>
-                <input
-                  type="text"
-                  name={field}
-                  value={formData.socialLinks[field] || ""}
-                  onChange={handleSocialChange}
-                  placeholder="https://..."
-                  className="bg-slate-900 border border-slate-800 rounded-xl px-2 py-1.5 text-[10px] text-white focus:outline-none focus:border-violet-500"
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Section 4: Chatbot Assistant Toggle */}
-        <div className="bg-slate-900/40 border border-slate-800 p-4 rounded-2xl flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <FaRobot className="text-violet-500 text-lg" />
-            <div>
-              <span className="text-xs font-semibold block text-white">Enable AI Visitor Assistant</span>
-              <span className="text-[10px] text-slate-400 block leading-tight">Allow card visitors to chat with your clone</span>
-            </div>
-          </div>
-          <input
-            type="checkbox"
-            name="showAiAssistant"
-            checked={formData.showAiAssistant}
-            onChange={handleInputChange}
-            className="w-4 h-4 text-violet-600 bg-slate-900 rounded border-slate-800 focus:ring-violet-500 cursor-pointer"
-          />
-        </div>
-
-        {/* Section 5: AI Prompt generation */}
-        <div className="bg-gradient-to-r from-violet-900/20 to-indigo-900/20 border border-indigo-500/20 rounded-2xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
-              <FaMagic className="text-indigo-400" />
-              <span>4. AI Custom Styling</span>
-            </label>
-            <span className="text-[9px] font-extrabold text-amber-500 bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-900/50">Costs 5 Credits</span>
-          </div>
-          
-          <span className="text-[10px] text-slate-400 block leading-relaxed">
-            Write styling keywords (e.g., <i>"cyberpunk neon themed with high-contrast"</i> or <i>"vintage terminal code styling"</i>) to let AI write custom card CSS/HTML templates.
-          </span>
-
-          <textarea
-            name="userPrompt"
-            value={formData.userPrompt}
-            onChange={handleInputChange}
-            rows="2"
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 resize-none"
-            placeholder="E.g., neon purple, dark futuristic cyberpunk layout, large elegant fonts..."
-          />
-
-          <button
-            onClick={handleGenerateAI}
-            disabled={aiStatus === "generating" || aiStatus === "polling"}
-            className="w-full bg-indigo-600 hover:bg-indigo-750 text-white rounded-xl py-2 px-3 text-xs font-bold flex items-center justify-center gap-1.5 shadow-md active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {aiStatus === "generating" || aiStatus === "polling" ? (
-              <span>Polled AI Response ({aiTimer}s)...</span>
-            ) : (
-              <>
-                <FaMagic />
-                <span>Generate Custom AI Card Layout</span>
-              </>
-            )}
-          </button>
-
-          {aiStatus === "error" && (
-            <div className="text-[10px] text-red-400 font-semibold bg-red-950/20 border border-red-900/30 p-2.5 rounded-xl">
-              Error: {aiError}
-            </div>
-          )}
-        </div>
-
-        {/* Footer Actions: Save Card */}
-        <div className="pt-2">
-          <button
-            onClick={handleSaveCard}
-            disabled={saveStatus === "saving"}
-            className="w-full bg-violet-600 hover:bg-violet-750 text-white rounded-xl py-3 px-4 font-bold text-xs flex items-center justify-center gap-2 shadow-lg hover:shadow-violet-500/10 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {saveStatus === "saving" ? (
-              <span>Saving Changes...</span>
-            ) : saveStatus === "saved" ? (
-              <>
-                <FaCheck />
-                <span>Business Card Saved!</span>
-              </>
-            ) : (
-              <>
-                <FaSave />
-                <span>Save Business Card</span>
-              </>
-            )}
-          </button>
-        </div>
-
-      </div>
-
-      {/* Main Panel: Preview & Share */}
-      <div className="flex-1 flex flex-col bg-slate-900">
-        
-        {/* Top Header / Info bar */}
-        <div className="px-6 py-4 bg-slate-900 border-b border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div>
-            <h1 className="text-base font-bold tracking-tight text-white">Live Workspace Preview</h1>
-            <p className="text-xs text-slate-400">See your digital business card update in real-time</p>
-          </div>
-
-          {urlHash && (
-            <div className="flex items-center gap-3">
-              <a
-                href={`/card/${urlHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1.5 bg-indigo-950/30 border border-indigo-900/40 px-3.5 py-2 rounded-xl transition-all"
-              >
-                <FaGlobe />
-                <span>Open Shared Card</span>
-                <FaArrowRight className="text-[10px]" />
+        {/* QR */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className={lbl}>QR Code</label>
+            {qrDataUrl && (
+              <a href={qrDataUrl} download="card-qr.png"
+                className="text-[10px] font-semibold text-gray-500 hover:text-gray-700 flex items-center gap-1 transition-colors">
+                <FaDownload className="text-[9px]" /> Save QR
               </a>
-            </div>
-          )}
-        </div>
-
-        {/* Preview Frame Area */}
-        <div className="flex-1 flex items-center justify-center p-6 bg-slate-950 relative">
-          
-          {/* Transparent Overlay when AI is generating */}
-          {(aiStatus === "generating" || aiStatus === "polling") && (
-            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center z-20 space-y-4">
-              <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-              <h3 className="text-sm font-bold text-white tracking-wide">AI Custom Card Styling</h3>
-              <p className="text-xs text-slate-400 text-center max-w-xs leading-relaxed">
-                Gemini LLM is engineering your custom Tailwind layout. This takes up to 15 seconds. Please wait...
-              </p>
-            </div>
-          )}
-
-          {/* Device Mock Frame */}
-          <div className="w-full max-w-md aspect-[9/16] max-h-[700px] bg-slate-900 rounded-[40px] border-[12px] border-slate-800 shadow-2xl relative flex flex-col overflow-hidden">
-            {/* Top Speaker/Camera notch */}
-            <div className="absolute top-2 left-1/2 -translate-x-1/2 w-32 h-4 bg-slate-800 rounded-full z-30"></div>
-            
-            {/* Iframe for card layout */}
-            <iframe
-              title="Card Live Preview"
-              className="w-full h-full border-none bg-slate-900 z-10"
-              srcDoc={generateCardDocument(formData)}
-              sandbox="allow-scripts"
-            />
+            )}
           </div>
+          {qrDataUrl ? (
+            <div className="bg-white border border-gray-200 rounded p-4 flex items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={qrDataUrl} alt="QR Code" className="w-36 h-36 sm:w-44 sm:h-44" />
+            </div>
+          ) : (
+            <div className="bg-gray-50 border border-dashed border-gray-200 rounded p-8 flex flex-col items-center justify-center gap-2">
+              <FaQrcode className="text-3xl text-gray-200" />
+              <p className="text-xs text-gray-400 text-center">Save your card to generate a QR code</p>
+            </div>
+          )}
         </div>
 
+        {/* Sign in */}
+        {!session?.user && (
+          <div className="bg-gray-50 border border-gray-200 rounded p-4 text-center space-y-3">
+            <p className="text-xs text-gray-600 leading-relaxed">Sign in to save, share, and manage multiple cards</p>
+            <button onClick={() => signIn("google")}
+              className="w-full bg-gray-900 hover:bg-gray-800 text-white rounded py-2.5 text-xs font-bold transition-all">
+              Sign in with Google
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ─── Main Render ──────────────────────────────────────────
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden bg-gray-50" style={{ minHeight: 0 }}>
+
+      {/* ══ MOBILE: tab bar ══════════════════════════════════ */}
+      <div className="lg:hidden flex border-b border-gray-200 bg-white flex-shrink-0">
+        {[
+          { id: "edit",    label: "Edit",    icon: FaPencilAlt },
+          { id: "preview", label: "Preview", icon: FaEye },
+          { id: "share",   label: "Share",   icon: FaShareAlt },
+        ].map(tab => (
+          <button key={tab.id} onClick={() => setMobileTab(tab.id)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-3 text-xs font-semibold transition-all border-b-2 ${
+              mobileTab === tab.id
+                ? "border-violet-500 text-violet-600"
+                : "border-transparent text-gray-400 hover:text-gray-600"
+            }`}>
+            <tab.icon className="text-[11px]" />
+            {tab.label}
+          </button>
+        ))}
       </div>
 
+      {/* ══ MOBILE: single panel based on tab ════════════════ */}
+      <div className="lg:hidden flex-1 overflow-hidden flex flex-col min-h-0">
+        {mobileTab === "edit" && (
+          <div className="flex-1 overflow-hidden flex flex-col bg-white min-h-0">
+            <FormPanel />
+          </div>
+        )}
+        {mobileTab === "preview" && (
+          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+            <PreviewPanel />
+          </div>
+        )}
+        {mobileTab === "share" && (
+          <div className="flex-1 overflow-y-auto bg-white min-h-0">
+            <SharePanel />
+          </div>
+        )}
+      </div>
+
+      {/* ══ DESKTOP: 3-column layout ═════════════════════════ */}
+      <div className="hidden lg:flex flex-1 overflow-hidden min-h-0">
+
+        {/* Left — Form */}
+        <aside className="w-72 xl:w-80 flex-shrink-0 bg-white border-r border-gray-100 flex flex-col overflow-hidden">
+          <FormPanel />
+        </aside>
+
+        {/* Center — Preview */}
+        <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <PreviewPanel />
+        </main>
+
+        {/* Right — Share (always visible on lg+) */}
+        <aside className="w-60 xl:w-64 flex-shrink-0 bg-white border-l border-gray-100 overflow-hidden flex flex-col">
+          <SharePanel />
+        </aside>
+      </div>
+
+      {/* ══ TABLET md: share drawer overlay ═════════════════ */}
+      {shareOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setShareOpen(false)} />
+          <div className="relative w-72 max-w-full bg-white border-l border-gray-200 shadow-2xl overflow-hidden flex flex-col">
+            <SharePanel />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
