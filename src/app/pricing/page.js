@@ -1,201 +1,121 @@
 "use client";
 
-import { useState, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import { useSession, signIn } from "next-auth/react";
-import { FaCoins, FaCheck, FaSpinner, FaTimesCircle, FaCheckCircle } from "react-icons/fa";
+import { useSession } from "next-auth/react";
+import { useState } from "react";
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import { FaCheck, FaInfoCircle } from "react-icons/fa";
+import axios from "axios";
+import toast, { Toaster } from "react-hot-toast";
 
-const plans = [
-  {
-    id: "starter",
-    name: "Starter Pack",
-    credits: 100,
-    price: "$10",
-    description: "Great for individuals wanting premium templates.",
-    features: [
-      "100 AI Generation Credits",
-      "Generate up to 20 Custom AI Styles",
-      "Built-in AI Visitor Chatbot",
-      "Downloadable QR Code",
-      "Basic Support",
-    ],
-  },
-  {
-    id: "pro",
-    name: "Professional Pack",
-    credits: 300,
-    price: "$25",
-    description: "Perfect for active freelancers and networkers.",
-    features: [
-      "300 AI Generation Credits",
-      "Generate up to 60 Custom AI Styles",
-      "Built-in AI Visitor Chatbot",
-      "Downloadable QR Code",
-      "Priority Support",
-      "Saves 15% on credits",
-    ],
-    recommended: true,
-  },
-  {
-    id: "business",
-    name: "Business Pack",
-    credits: 750,
-    price: "$50",
-    description: "Ideal for agencies and corporate teams.",
-    features: [
-      "750 AI Generation Credits",
-      "Generate up to 150 Custom AI Styles",
-      "Built-in AI Visitor Chatbot",
-      "Downloadable QR Code",
-      "Dedicated 24/7 Support",
-      "Saves 33% on credits",
-    ],
-  },
+const PLANS = [
+  { id: "basic", name: "Basic Pack", price: "$5", credits: 100, description: "Perfect for testing custom prompts and exploring styles." },
+  { id: "standard", name: "Standard Pack", price: "$10", credits: 250, description: "Ideal for regular creators wanting high resolution outputs." },
+  { id: "pro", name: "Professional Pack", price: "$20", credits: 600, description: "Designed for power users demanding batch exports and high speed.", popular: true },
+  { id: "business", name: "Business Pack", price: "$50", credits: 2000, description: "Maximum value pack for agency workflows and large volume generations." }
 ];
 
-function PricingContent() {
-  const { data: session } = useSession();
-  const searchParams = useSearchParams();
-  const success = searchParams.get("success");
-  const canceled = searchParams.get("canceled");
-  const [loadingPlan, setLoadingPlan] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+export default function Pricing() {
+  const { data: session, status } = useSession();
+  const [loadingPlan, setLoadingPlan] = useState(null);
 
   const handleCheckout = async (planId) => {
-    if (!session) { signIn("google"); return; }
+    if (status !== "authenticated") {
+      toast.error("You must sign in with Google to purchase credit packages.");
+      return;
+    }
+
     setLoadingPlan(planId);
-    setErrorMsg("");
     try {
-      const res = await fetch("/api/stripe/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId }),
-      });
-      if (!res.ok) throw new Error("Failed to initialize checkout");
-      const { url } = await res.json();
-      if (url) window.location.href = url;
-      else throw new Error("No checkout URL returned");
-    } catch (e) {
-      setErrorMsg(e.message || "An error occurred.");
-      setLoadingPlan("");
+      const { data } = await axios.post("/api/checkout", { planId });
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error("No redirection URL returned");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.error || "Failed to trigger Stripe checkout session.");
+    } finally {
+      setLoadingPlan(null);
     }
   };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50 py-12 px-6">
-      <div className="max-w-4xl mx-auto flex flex-col gap-10">
+    <div className="flex min-h-dvh flex-col bg-bg-page select-none text-primary-text overflow-hidden">
+      <Toaster position="top-right" />
+      <Navbar />
 
-        {/* Header */}
-        <div className="text-center max-w-xl mx-auto">
-          <h1 className="text-3xl font-extrabold text-gray-900 leading-tight">Flexible Credit Plans</h1>
-          <p className="text-sm text-gray-500 mt-2 leading-relaxed">
-            Purchase credits to design custom business card styles using AI. Custom layouts cost 5 credits each.
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-12 sm:px-6 lg:px-8 flex flex-col gap-10 overflow-y-auto scrollbar-subtle items-center">
+        <div className="text-center space-y-4">
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-primary/10 border border-primary/20 rounded-full mb-1">
+            <FaInfoCircle className="text-primary text-xs" />
+            <span className="text-[10px] font-black text-primary uppercase tracking-widest">Pricing Plans</span>
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-black tracking-tight uppercase">Buy Credits Packs</h1>
+          <p className="text-xs sm:text-sm text-secondary-text max-w-lg leading-relaxed">
+            Purchase flexible credit packages to perform high-resolution predictions. Keep all profits — we handle AI infrastructure.
           </p>
         </div>
 
-        {/* Alerts */}
-        {success && (
-          <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 flex items-center gap-3 max-w-xl mx-auto">
-            <FaCheckCircle className="text-emerald-500 text-lg flex-shrink-0" />
-            <div>
-              <span className="font-bold text-sm block">Purchase Complete!</span>
-              <p className="text-xs text-emerald-600 mt-0.5">Your credits have been added. Go generate something amazing.</p>
-            </div>
-          </div>
-        )}
-        {canceled && (
-          <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 flex items-center gap-3 max-w-xl mx-auto">
-            <FaTimesCircle className="text-amber-500 text-lg flex-shrink-0" />
-            <div>
-              <span className="font-bold text-sm block">Purchase Canceled</span>
-              <p className="text-xs text-amber-600 mt-0.5">No charges were made. You can try again anytime.</p>
-            </div>
-          </div>
-        )}
-        {errorMsg && (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 flex items-center gap-3 max-w-xl mx-auto">
-            <FaTimesCircle className="text-red-500 text-lg flex-shrink-0" />
-            <span className="text-sm">{errorMsg}</span>
-          </div>
-        )}
-
-        {/* Pricing Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {plans.map((plan) => (
+        {/* Pricing Cards Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full max-w-5xl">
+          {PLANS.map((plan) => (
             <div
               key={plan.id}
-              className={`bg-white border rounded-2xl p-7 flex flex-col relative transition-all hover:shadow-lg ${
-                plan.recommended
-                  ? "border-violet-400 shadow-md ring-2 ring-violet-500/10"
-                  : "border-gray-200 shadow-sm"
+              className={`relative bg-bg-card border rounded-lg p-6 flex flex-col justify-between gap-6 transition-all duration-300 hover:shadow-2xl hover:-translate-y-1 ${
+                plan.popular ? "border-primary shadow-xl shadow-primary/5 scale-105" : "border-divider/50 shadow-md"
               }`}
             >
-              {plan.recommended && (
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-violet-600 text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full">
+              {plan.popular && (
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary text-white text-[9px] font-black uppercase px-3 py-1 rounded-full tracking-wider shadow">
                   Most Popular
                 </span>
               )}
 
-              <div className="mb-5">
-                <h3 className="text-base font-bold text-gray-900">{plan.name}</h3>
-                <p className="text-xs text-gray-500 mt-1">{plan.description}</p>
-                <div className="flex items-baseline gap-1 mt-4">
-                  <span className="text-3xl font-black text-gray-900">{plan.price}</span>
-                  <span className="text-xs text-gray-400 font-medium">one-time</span>
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-extrabold uppercase tracking-wide text-primary-text">{plan.name}</h3>
+                  <p className="text-2xl font-black tracking-tight text-white">{plan.price}</p>
                 </div>
-              </div>
-
-              {/* Credit badge */}
-              <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-100 rounded-xl mb-5">
-                <FaCoins className="text-amber-500 text-sm" />
-                <div>
-                  <span className="text-xs font-bold text-amber-700">{plan.credits} AI Credits</span>
-                  <p className="text-[10px] text-amber-600 leading-tight">Up to {Math.floor(plan.credits / 5)} custom styles</p>
+                
+                <div className="text-xs bg-bg-page/50 border border-divider/30 p-3 rounded text-center font-extrabold text-primary">
+                  {plan.credits} Art Credits
                 </div>
-              </div>
 
-              {/* Features */}
-              <ul className="flex-1 flex flex-col gap-2.5 mb-7">
-                {plan.features.map((f, i) => (
-                  <li key={i} className="flex items-start gap-2 text-xs text-gray-600">
-                    <FaCheck className="text-violet-500 text-[10px] mt-0.5 flex-shrink-0" />
-                    <span>{f}</span>
+                <p className="text-xs text-secondary-text leading-relaxed font-medium min-h-[3rem]">{plan.description}</p>
+                
+                <ul className="space-y-2 border-t border-divider/30 pt-4 text-xs font-semibold text-secondary-text">
+                  <li className="flex items-center gap-2">
+                    <FaCheck className="text-primary text-[10px]" />
+                    <span>Dynamic aspect ratios</span>
                   </li>
-                ))}
-              </ul>
+                  <li className="flex items-center gap-2">
+                    <FaCheck className="text-primary text-[10px]" />
+                    <span>HD image downloads</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <FaCheck className="text-primary text-[10px]" />
+                    <span>No subscription required</span>
+                  </li>
+                </ul>
+              </div>
 
               <button
                 onClick={() => handleCheckout(plan.id)}
-                disabled={loadingPlan !== ""}
-                className={`w-full py-3 text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 ${
-                  plan.recommended
-                    ? "bg-violet-600 hover:bg-violet-700 text-white shadow-md shadow-violet-500/20"
-                    : "bg-gray-900 hover:bg-gray-800 text-white"
-                } disabled:opacity-50`}
+                disabled={loadingPlan !== null}
+                className={`w-full py-3 rounded-full text-xs font-bold transition-all shadow-md cursor-pointer select-none active:scale-[0.98] ${
+                  plan.popular ? "bg-primary text-white hover:bg-primary-hover shadow-primary/15" : "bg-bg-page hover:bg-bg-card text-primary-text border border-divider"
+                }`}
               >
-                {loadingPlan === plan.id ? <FaSpinner className="animate-spin" /> : "Get Started"}
+                {loadingPlan === plan.id ? "Loading checkout..." : "Purchase Credits"}
               </button>
             </div>
           ))}
         </div>
+      </main>
 
-        {/* Bottom note */}
-        <p className="text-center text-xs text-gray-400">
-          Secure payment via Stripe. Credits never expire. No subscriptions.
-        </p>
-      </div>
+      <Footer />
     </div>
-  );
-}
-
-export default function PricingPage() {
-  return (
-    <Suspense fallback={
-      <div className="flex-1 flex items-center justify-center bg-gray-50">
-        <FaSpinner className="text-3xl text-violet-500 animate-spin" />
-      </div>
-    }>
-      <PricingContent />
-    </Suspense>
   );
 }
