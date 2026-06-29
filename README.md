@@ -10,12 +10,9 @@
     <img src="https://img.shields.io/badge/Part%20of-Awesome%20Generative%20AI%20Apps-FFD700?style=for-the-badge&logo=github&logoColor=black" alt="Awesome Generative AI Apps">
   </a>
 </p>
-
 > 🎨 **[Explore 50+ more open-source AI apps →](https://github.com/Anil-matcha/awesome-generative-ai-apps)**
 
-[![Watch the CardAI Creator Demo Video](https://cdn.muapi.ai/data/2/191243157668/Screenshot_2026-05-25_141220.png)](https://cdn.muapi.ai/github-videos/ai-business-card.mp4)
-
-*🎬 Click the image above to watch the interactive demo video.*
+https://github.com/SamurAIGPT/ai-business-card/blob/main/demo.mp4
 
 ## 🌐 Project Details
 
