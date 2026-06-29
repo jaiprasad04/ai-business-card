@@ -12,7 +12,7 @@
 </p>
 > 🎨 **[Explore 50+ more open-source AI apps →](https://github.com/Anil-matcha/awesome-generative-ai-apps)**
 
-https://github.com/SamurAIGPT/ai-business-card/blob/main/demo.mp4
+https://github.com/user-attachments/assets/ae731f0a-8f9b-424c-908c-b35a52dd62eb
 
 ## 🌐 Project Details
 
