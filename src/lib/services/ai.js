@@ -3,11 +3,14 @@ import { UserService } from "./user";
 import config from "@/lib/config";
 
 export const AIService = {
-  async generateCardHTML(userId, cardId, userPrompt) {
-    const cost = config.ai.generationCost;
+  async generateCardHTML(userId, cardId, userPrompt, customApiKey = null) {
+    const isUsingCustomKey = Boolean(customApiKey && customApiKey.trim().length > 0);
+    const cost = isUsingCustomKey ? 0 : config.ai.generationCost;
     
-    // 1. Deduct credits first
-    await UserService.deductCredits(userId, cost);
+    // 1. Deduct credits first (only if not using custom API key)
+    if (!isUsingCustomKey && cost > 0) {
+      await UserService.deductCredits(userId, cost);
+    }
 
     const card = await prisma.businessCard.findUnique({
       where: { id: cardId }
@@ -17,7 +20,7 @@ export const AIService = {
       throw new Error("Business card not found");
     }
 
-    const apiKey = config.ai.apiKey;
+    const apiKey = isUsingCustomKey ? customApiKey.trim() : config.ai.apiKey;
     if (!apiKey || apiKey.includes("your_") || apiKey.trim() === "") {
       console.warn("MUAPIAPP_API_KEY is not configured or invalid. Falling back to local Mock HTML Generation.");
       const request_id = `mock_${Date.now()}`;

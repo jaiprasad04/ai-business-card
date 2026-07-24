@@ -11,13 +11,17 @@ export async function POST(req) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
-    const { cardId, userPrompt } = await req.json();
+    const body = await req.json();
+    const { cardId, userPrompt } = body;
 
     if (!cardId) {
       return new NextResponse("Card ID is required", { status: 400 });
     }
 
-    const requestId = await AIService.generateCardHTML(session.user.id, cardId, userPrompt);
+    const headerApiKey = req.headers.get("x-custom-api-key");
+    const customApiKey = headerApiKey || body.customApiKey || session.user.customApiKey || null;
+
+    const requestId = await AIService.generateCardHTML(session.user.id, cardId, userPrompt, customApiKey);
 
     return NextResponse.json({ requestId });
   } catch (error) {
